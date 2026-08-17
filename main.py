@@ -34,7 +34,7 @@ preprocess = transforms.Compose([
 ])
 
 
-# دالة ذكية للبحث عن مسار الصورة الفعلي
+# دالة ذكية للبحث عن مسار الصورة
 def find_image_path(filename, base_dir):
     for root, dirs, files in os.walk(base_dir):
         if filename in files:
@@ -110,16 +110,14 @@ if uploaded_file is not None:
                 for i, (filename, dist) in enumerate(zip(match_filenames, match_distances)):
                     with cols[i]:
                         real_path = find_image_path(filename, base_dir)
-
-                        # إذا تم إيجاد مسار الصورة محلياً، سيتم عرضها كصورة حقيقية
                         if real_path and os.path.exists(real_path):
                             st.image(real_path, use_column_width=True)
                         else:
-                            # تنبيه لطيف في حال كانت الصورة غير موجودة في المجلدات المحلية
-                            st.warning(f"Image not found:\n{filename}")
+                            st.info(f"Item: {filename}")
 
-                        # حساب نسبة التشابه بدقة
-                        similarity = 100.0 / (1.0 + dist)
+                        # معادلة النسبة المئوية (تم زيادة القاسم إلى 10 لضمان ظهور أرقام)
+                        # جربي تغيير الرقم 10.0 إلى رقم أكبر إذا استمرت النسبة 0
+                        similarity = max(0.0, (1.0 - (dist / 10.0)) * 100)
 
                         st.caption(f"Similarity: {similarity:.2f}%")
             else:
