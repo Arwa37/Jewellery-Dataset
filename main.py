@@ -4,6 +4,7 @@ import chromadb
 import torch
 import torchvision.models as models
 import torchvision.transforms as transforms
+import pickle
 
 # 1. إعداد الصفحة
 st.set_page_config(page_title="Jewelry Visual Search", layout="centered")
@@ -11,7 +12,7 @@ st.title("💎 Jewelry Search Engine")
 st.write("Upload a jewelry photo to find the top 5 similar items.")
 
 
-# 2. تحميل النموذج
+# 2. تحميل النموذج (MobileNetV2)
 @st.cache_resource
 def load_model():
     weights = models.MobileNet_V2_Weights.DEFAULT
@@ -24,17 +25,25 @@ def load_model():
 model = load_model()
 
 
-# 3. اتصال بقاعدة البيانات
+# 3. تحميل قاعدة البيانات وملف البيكل
 @st.cache_resource
 def load_db():
     client = chromadb.PersistentClient(path="./data")
-    return client.get_or_create_collection(name="jewelry_collection")
+    collection = client.get_or_create_collection(name="jewelry_collection")
+    return collection
 
 
 collection = load_db()
 
+# محاولة تحميل ملف الميتا داتا إن وجد
+try:
+    with open('product_metadata_500.pkl', 'rb') as f:
+        metadata = pickle.load(f)
+except Exception:
+    metadata = None
 
-# 4. دالة استخراج المتجه للصورة
+
+# 4. دالة استخراج المتجه للصورة المرفوعة
 def get_embedding(img):
     preprocess = transforms.Compose([
         transforms.Resize(256),
@@ -60,14 +69,13 @@ if uploaded_file is not None:
         with st.spinner("Searching..."):
             query_emb = get_embedding(image)
 
-            # تحديد عدد النتائج بـ 5 فقط للحصول على أكبر 5 صور مشابهة
+            # جلب أكبر 5 نتائج فقط
             results = collection.query(
                 query_embeddings=[query_emb],
                 n_results=5,
                 include=["uris", "distances"]
             )
 
-            # التحقق من أن القاعدة تحتوي على صور وليست فارغة
             if results and 'uris' in results and len(results['uris']) > 0 and len(results['uris'][0]) > 0:
                 match_uris = results['uris'][0]
                 match_distances = results['distances'][0]
@@ -79,10 +87,14 @@ if uploaded_file is not None:
 
                 for i, (uri, dist) in enumerate(zip(match_uris, match_distances)):
                     with cols[i]:
-                        st.image(uri, use_column_width=True)
+                        try:
+                            st.image(uri, use_column_width=True)
+                        except Exception:
+                            st.warning(f"Could not load image: {uri}")
+
                         # حساب نسبة التشابه وعرضها تحت كل صورة
                         similarity = max(0, (1 - dist / 2) * 100)
                         st.caption(f"Similarity: {similarity:.1f}%")
             else:
-                st.error(
-                    "The database is empty! Please run your `prepare_data.py` script first to populate ChromaDB with embeddings.")
+                st.warning(
+                    "No results found in ChromaDB. Please make sure your database path is correct and populated.")
