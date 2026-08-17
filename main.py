@@ -6,6 +6,7 @@ import torch
 import torchvision.models as models
 import torchvision.transforms as transforms
 import pickle
+import numpy as np
 
 st.set_page_config(page_title="Jewelry Visual Search", layout="centered")
 st.title("💎 Jewelry Search Engine")
@@ -109,7 +110,8 @@ if uploaded_file is not None:
                         else:
                             st.info(f"Item: {filename}")
 
-                        similarity = max(0.0, (1.0 - (dist / 2.0)) * 100)
+                        # حساب نسبة التشابه باستخدام اضمحلال الأسي لضمان عدم ظهور صفر ولإعطاء نسب دقيقة
+                        similarity = float(np.exp(-dist) * 100)
                         st.caption(f"Similarity: {similarity:.2f}%")
             else:
                 st.warning("No results found.")
