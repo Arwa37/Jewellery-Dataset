@@ -34,7 +34,7 @@ preprocess = transforms.Compose([
 ])
 
 
-# 3. إعداد قاعدة البيانات من ملف الـ pkl
+# 3. إعداد قاعدة البيانات
 @st.cache_resource
 def init_db():
     client = chromadb.PersistentClient(path="./data")
@@ -52,14 +52,16 @@ def init_db():
             paths = payload.get('paths', [])
 
             for idx, (feat, path) in enumerate(zip(features, paths)):
-                # استخدام المسار أو معرف فريد
+                # توجيه المسار للمجلد المحلي الصحيح بناءً على اسم الملف
+                filename = os.path.basename(path)
+                folder = "ring" if "ring" in path.lower() or "ring" in filename.lower() else "necklace"
+                correct_path = os.path.join(base_dir, "Jewellery_Data", folder, filename)
+
                 collection.add(
                     embeddings=[feat if isinstance(feat, list) else feat.tolist()],
-                    uris=[str(path)],
+                    uris=[correct_path],
                     ids=[str(idx)]
                 )
-            st.success(f"Successfully loaded {len(paths)} items into database!")
-
     return collection
 
 
@@ -86,7 +88,7 @@ if uploaded_file is not None:
         with st.spinner("Searching..."):
             query_emb = get_embedding(image)
 
-            # جلب أكبر 5 نتائج
+            # جلب أكبر 5 نتائج مع المسافات
             results = collection.query(
                 query_embeddings=[query_emb],
                 n_results=5,
@@ -104,12 +106,19 @@ if uploaded_file is not None:
 
                 for i, (uri, dist) in enumerate(zip(match_uris, match_distances)):
                     with cols[i]:
-                        # بما أن الصور غير مرفوعة محلياً، سنعرض اسم الصورة أو مسارها كمرجع بدلاً من st.image لتجنب الخطأ
-                        st.text(f"Match #{i + 1}")
-                        st.caption(f"Path: {os.path.basename(uri)}")
+                        # محاولة عرض الصورة الحقيقية
+                        try:
+                            st.image(uri, use_column_width=True)
+                        except Exception:
+                            st.warning("Image file missing locally")
 
-                        # نسبة التشابه
-                        similarity = max(0, (1.0 - (dist / 4.0)) * 100)
-                        st.caption(f"Similarity: {similarity:.1f}%")
+                        # تصحيح حساب نسبة التشابه لتظهر أرقام عشرية صحيحة (تحويل المسافة إلى نسبة مئوية)
+                        # كلما كانت المسافة أقل (Distance)، كلما زادت نسبة التشابه
+                        similarity = max(0.0, (1.0 - dist) * 100)
+                        if similarity == 0.0 and dist < 2.0:
+                            # معادلة بديلة في حال كانت المسافات تتراوح في نطاق مختلف
+                            similarity = max(0.0, 100 - (dist * 50))
+
+                        st.caption(f"Similarity: {similarity:.2f}%")
             else:
                 st.warning("No results found in the database.")
