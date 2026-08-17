@@ -34,7 +34,7 @@ preprocess = transforms.Compose([
 ])
 
 
-# 3. إعداد قاعدة البيانات وتصحيح المسارات تلقائياً
+# 3. إعداد قاعدة البيانات من ملف الـ pkl
 @st.cache_resource
 def init_db():
     client = chromadb.PersistentClient(path="./data")
@@ -43,9 +43,8 @@ def init_db():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     pkl_path = os.path.join(base_dir, 'product_metadata_500.pkl')
 
-    # إذا كانت القاعدة فارغة، نقوم بتعبئتها مع تصحيح المسارات لتناسب سيرفر السحابة
     if collection.count() == 0 and os.path.exists(pkl_path):
-        with st.spinner("Loading and fixing paths into ChromaDB... Please wait."):
+        with st.spinner("Loading data into ChromaDB... Please wait."):
             with open(pkl_path, 'rb') as f:
                 payload = pickle.load(f)
 
@@ -53,14 +52,10 @@ def init_db():
             paths = payload.get('paths', [])
 
             for idx, (feat, path) in enumerate(zip(features, paths)):
-                # تصحيح المسار القديم واستبداله بالمسار الصحيح المحلي على السيرفر
-                filename = os.path.basename(path)
-                folder = "ring" if "ring" in path.lower() else "necklace"
-                new_path = os.path.join(base_dir, "Jewellery_Data", folder, filename)
-
+                # استخدام المسار أو معرف فريد
                 collection.add(
                     embeddings=[feat if isinstance(feat, list) else feat.tolist()],
-                    uris=[new_path],
+                    uris=[str(path)],
                     ids=[str(idx)]
                 )
             st.success(f"Successfully loaded {len(paths)} items into database!")
@@ -91,7 +86,7 @@ if uploaded_file is not None:
         with st.spinner("Searching..."):
             query_emb = get_embedding(image)
 
-            # جلب أكبر 5 نتائج فقط بدقة
+            # جلب أكبر 5 نتائج
             results = collection.query(
                 query_embeddings=[query_emb],
                 n_results=5,
@@ -109,12 +104,11 @@ if uploaded_file is not None:
 
                 for i, (uri, dist) in enumerate(zip(match_uris, match_distances)):
                     with cols[i]:
-                        try:
-                            st.image(uri, use_column_width=True)
-                        except Exception:
-                            st.warning(f"Image not found at path.")
+                        # بما أن الصور غير مرفوعة محلياً، سنعرض اسم الصورة أو مسارها كمرجع بدلاً من st.image لتجنب الخطأ
+                        st.text(f"Match #{i + 1}")
+                        st.caption(f"Path: {os.path.basename(uri)}")
 
-                        # حساب نسبة التشابه وعرضها تحت الصورة
+                        # نسبة التشابه
                         similarity = max(0, (1.0 - (dist / 4.0)) * 100)
                         st.caption(f"Similarity: {similarity:.1f}%")
             else:
