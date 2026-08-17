@@ -6,13 +6,14 @@ import torch
 import torchvision.models as models
 import torchvision.transforms as transforms
 import pickle
-import numpy as np
 
+# 1. إعداد الصفحة
 st.set_page_config(page_title="Jewelry Visual Search", layout="centered")
 st.title("💎 Jewelry Search Engine")
 st.write("Upload a jewelry photo to find the top 5 similar items.")
 
 
+# 2. تحميل النموذج
 @st.cache_resource
 def load_model():
     weights = models.MobileNet_V2_Weights.DEFAULT
@@ -24,6 +25,7 @@ def load_model():
 
 model = load_model()
 
+# تحويلات الصور
 preprocess = transforms.Compose([
     transforms.Resize(256),
     transforms.CenterCrop(224),
@@ -32,6 +34,7 @@ preprocess = transforms.Compose([
 ])
 
 
+# دالة ذكية للبحث عن مسار الصورة
 def find_image_path(filename, base_dir):
     for root, dirs, files in os.walk(base_dir):
         if filename in files:
@@ -39,6 +42,7 @@ def find_image_path(filename, base_dir):
     return None
 
 
+# 3. إعداد قاعدة البيانات
 @st.cache_resource
 def init_db():
     client = chromadb.PersistentClient(path="./data")
@@ -78,6 +82,7 @@ def get_embedding(img):
     return embedding.tolist()
 
 
+# 4. واجهة البحث
 uploaded_file = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
@@ -110,8 +115,10 @@ if uploaded_file is not None:
                         else:
                             st.info(f"Item: {filename}")
 
-                        # حساب نسبة التشابه باستخدام اضمحلال الأسي لضمان عدم ظهور صفر ولإعطاء نسب دقيقة
-                        similarity = float(np.exp(-dist) * 100)
+                        # معادلة النسبة المئوية (تم زيادة القاسم إلى 10 لضمان ظهور أرقام)
+                        # جربي تغيير الرقم 10.0 إلى رقم أكبر إذا استمرت النسبة 0
+                        similarity = max(0.0, (1.0 - (dist / 10.0)) * 100)
+
                         st.caption(f"Similarity: {similarity:.2f}%")
             else:
                 st.warning("No results found.")
