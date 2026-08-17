@@ -4,11 +4,11 @@ import chromadb
 import torch
 import torchvision.models as models
 import torchvision.transforms as transforms
+import pickle  # استيراد مكتبة البيكل
 
 # 1. إعداد الصفحة
 st.set_page_config(page_title="Jewelry Visual Search", layout="centered")
 st.title("💎 Jewelry Search Engine")
-st.write("Upload a jewelry photo to find similar items.")
 
 
 # 2. تحميل النموذج
@@ -24,17 +24,22 @@ def load_model():
 model = load_model()
 
 
-# 3. اتصال بقاعدة البيانات (باستخدام get_or_create_collection لتجنب الأخطاء)
+# 3. تحميل قاعدة البيانات وملف الميتا داتا
 @st.cache_resource
-def load_db():
+def load_data():
     client = chromadb.PersistentClient(path="./data")
-    return client.get_or_create_collection(name="jewelry_collection")
+    collection = client.get_or_create_collection(name="jewelry_collection")
+
+    # تحميل ملف البيكل
+    with open('product_metadata_500.pkl', 'rb') as f:
+        metadata = pickle.load(f)
+    return collection, metadata
 
 
-collection = load_db()
+collection, metadata = load_data()
 
 
-# 4. دالة استخراج المتجه للصورة
+# 4. دالة استخراج المتجه
 def get_embedding(img):
     preprocess = transforms.Compose([
         transforms.Resize(256),
@@ -49,7 +54,7 @@ def get_embedding(img):
     return embedding.tolist()
 
 
-# 5. واجهة رفع الصورة والبحث
+# 5. واجهة البحث
 uploaded_file = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
@@ -66,9 +71,21 @@ if uploaded_file is not None:
             )
 
             match_uris = results['uris'][0]
+            match_distances = results['distances'][0]
+
+            st.success(f"Found {len(match_uris)} similar items!")
 
             st.subheader("Similar Items:")
             cols = st.columns(5)
-            for i, uri in enumerate(match_uris):
+
+            for i, (uri, dist) in enumerate(zip(match_uris, match_distances)):
                 with cols[i % 5]:
                     st.image(uri, use_column_width=True)
+
+                    # ربط النتيجة بملف الميتا داتا (نفترض أن الميتا داتا مفهرسة بمسار الصورة)
+                    # يمكنك تغيير 'product_name' إلى المفتاح الموجود فعلياً في ملف البيكل الخاص بك
+                    product_info = metadata.get(uri, "Unknown Product")
+
+                    similarity = max(0, (1 - dist / 2) * 100)
+                    st.caption(f"**{product_info}**")  # عرض اسم المنتج
+                    st.caption(f"Similarity: {similarity:.1f}%")
