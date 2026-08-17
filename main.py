@@ -25,6 +25,7 @@ def load_model():
 
 model = load_model()
 
+# تحويلات الصور
 preprocess = transforms.Compose([
     transforms.Resize(256),
     transforms.CenterCrop(224),
@@ -42,8 +43,9 @@ def init_db():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     pkl_path = os.path.join(base_dir, 'product_metadata_500.pkl')
 
+    # إذا كانت القاعدة فارغة، نقوم بتعبئتها مع تصحيح المسارات لتناسب سيرفر السحابة
     if collection.count() == 0 and os.path.exists(pkl_path):
-        with st.spinner("Loading data into ChromaDB... Please wait."):
+        with st.spinner("Loading and fixing paths into ChromaDB... Please wait."):
             with open(pkl_path, 'rb') as f:
                 payload = pickle.load(f)
 
@@ -51,16 +53,14 @@ def init_db():
             paths = payload.get('paths', [])
 
             for idx, (feat, path) in enumerate(zip(features, paths)):
-                # تصحيح المسار ليعمل على السحابة إذا كان يبدأ بمسارات كاجل القديمة
-                # سنعتمد على أخذ اسم المجلد الأخير والملف (مثل ring/ring_018.jpg) وربطه بمجلد المشروع المحلي
-                clean_path = path.replace("\\", "/")
-                if "Jewellery_Data" in clean_path:
-                    relative_part = clean_path.split("Jewellery_Data/")[-1]
-                    path = os.path.join(base_dir, "Jewellery_Data", relative_part)
+                # تصحيح المسار القديم واستبداله بالمسار الصحيح المحلي على السيرفر
+                filename = os.path.basename(path)
+                folder = "ring" if "ring" in path.lower() else "necklace"
+                new_path = os.path.join(base_dir, "Jewellery_Data", folder, filename)
 
                 collection.add(
                     embeddings=[feat if isinstance(feat, list) else feat.tolist()],
-                    uris=[path],
+                    uris=[new_path],
                     ids=[str(idx)]
                 )
             st.success(f"Successfully loaded {len(paths)} items into database!")
@@ -71,6 +71,7 @@ def init_db():
 collection = init_db()
 
 
+# دالة استخراج المتجه للصورة المرفوعة
 def get_embedding(img):
     tensor = preprocess(img).unsqueeze(0)
     with torch.no_grad():
@@ -79,7 +80,7 @@ def get_embedding(img):
     return embedding.tolist()
 
 
-# 4. واجهة البحث
+# 4. واجهة رفع الصورة والبحث
 uploaded_file = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
@@ -90,6 +91,7 @@ if uploaded_file is not None:
         with st.spinner("Searching..."):
             query_emb = get_embedding(image)
 
+            # جلب أكبر 5 نتائج فقط بدقة
             results = collection.query(
                 query_embeddings=[query_emb],
                 n_results=5,
@@ -110,10 +112,10 @@ if uploaded_file is not None:
                         try:
                             st.image(uri, use_column_width=True)
                         except Exception:
-                            st.warning(f"Image not found at: {uri}")
+                            st.warning(f"Image not found at path.")
 
-                        # حساب دقيق لنسبة التشابه بناءً على المسافة
+                        # حساب نسبة التشابه وعرضها تحت الصورة
                         similarity = max(0, (1.0 - (dist / 4.0)) * 100)
                         st.caption(f"Similarity: {similarity:.1f}%")
             else:
-                st.warning("No results found.")
+                st.warning("No results found in the database.")
