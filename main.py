@@ -34,12 +34,19 @@ preprocess = transforms.Compose([
 ])
 
 
-# 3. إعداد قاعدة البيانات وتحديث المسارات إجبارياً
+# دالة بحث مرنة لإيجاد مكان الصورة بغض النظر عن المسار القديم
+def find_image_path(filename, base_dir):
+    for root, dirs, files in os.walk(base_dir):
+        if filename in files:
+            return os.path.join(root, filename)
+    return None
+
+
+# 3. إعداد قاعدة البيانات وتخزين الأسماء
 @st.cache_resource
 def init_db():
     client = chromadb.PersistentClient(path="./data")
 
-    # مسح القولكشن القديم إن وجد لضمان عدم حدوث تعارض في المسارات القديمة
     try:
         client.delete_collection(name="jewelry_collection")
     except Exception:
@@ -51,7 +58,7 @@ def init_db():
     pkl_path = os.path.join(base_dir, 'product_metadata_500.pkl')
 
     if os.path.exists(pkl_path):
-        with st.spinner("Processing and linking local images... Please wait."):
+        with st.spinner("Loading metadata... Please wait."):
             with open(pkl_path, 'rb') as f:
                 payload = pickle.load(f)
 
@@ -60,15 +67,12 @@ def init_db():
 
             for idx, (feat, path) in enumerate(zip(features, paths)):
                 filename = os.path.basename(path)
-                folder = "ring" if "ring" in path.lower() or "ring" in filename.lower() else "necklace"
-                correct_path = os.path.join(base_dir, "Jewellery_Data", folder, filename)
-
                 collection.add(
                     embeddings=[feat if isinstance(feat, list) else feat.tolist()],
-                    uris=[correct_path],
+                    uris=[filename],
                     ids=[str(idx)]
                 )
-            st.success(f"Successfully loaded {len(paths)} items with correct paths!")
+            st.success(f"Successfully loaded {len(paths)} items!")
 
     return collection
 
@@ -101,21 +105,24 @@ if uploaded_file is not None:
                 include=["uris", "distances"]
             )
 
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+
             if results and 'uris' in results and len(results['uris']) > 0 and len(results['uris'][0]) > 0:
-                match_uris = results['uris'][0]
+                match_filenames = results['uris'][0]
                 match_distances = results['distances'][0]
 
-                st.success(f"Found top {len(match_uris)} similar items!")
+                st.success(f"Found top {len(match_filenames)} similar items!")
                 st.subheader("Top 5 Similar Items:")
                 cols = st.columns(5)
 
-                for i, (uri, dist) in enumerate(zip(match_uris, match_distances)):
+                for i, (filename, dist) in enumerate(zip(match_filenames, match_distances)):
                     with cols[i]:
-                        # التحقق من وجود الصورة محلياً وعرضها بشكل صحيح
-                        if os.path.exists(uri):
-                            st.image(uri, use_column_width=True)
+                        real_path = find_image_path(filename, base_dir)
+
+                        if real_path and os.path.exists(real_path):
+                            st.image(real_path, use_column_width=True)
                         else:
-                            st.warning(f"File not found:\n{os.path.basename(uri)}")
+                            st.warning(f"Missing: {filename}")
 
                         # حساب نسبة التشابه الدقيقة
                         similarity = max(0.0, (1.0 - (dist / 2.0)) * 100)
