@@ -5,6 +5,7 @@ import torch
 import torchvision.models as models
 import torchvision.transforms as transforms
 import pickle
+import os
 
 # 1. إعداد الصفحة
 st.set_page_config(page_title="Jewelry Visual Search", layout="centered")
@@ -12,7 +13,7 @@ st.title("💎 Jewelry Search Engine")
 st.write("Upload a jewelry photo to find the top 5 similar items.")
 
 
-# 2. تحميل النموذج (MobileNetV2)
+# 2. تحميل النموذج
 @st.cache_resource
 def load_model():
     weights = models.MobileNet_V2_Weights.DEFAULT
@@ -24,33 +25,47 @@ def load_model():
 
 model = load_model()
 
+# تحويلات الصور
+preprocess = transforms.Compose([
+    transforms.Resize(256),
+    transforms.CenterCrop(224),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
 
-# 3. تحميل قاعدة البيانات وملف البيكل
+
+# 3. إعداد قاعدة البيانات وتعبئتها من ملف الـ pkl مباشرة إذا كانت فارغة
 @st.cache_resource
-def load_db():
+def init_db():
     client = chromadb.PersistentClient(path="./data")
     collection = client.get_or_create_collection(name="jewelry_collection")
+
+    # إذا كانت القاعدة فارغة، نقوم بقراءة ملف البيكل وتعبئة القاعدة
+    if collection.count() == 0 and os.path.exists('product_metadata_500.pkl'):
+        with st.spinner("Loading data into ChromaDB... Please wait."):
+            with open('product_metadata_500.pkl', 'rb') as f:
+                payload = pickle.load(f)
+
+            features = payload.get('features', [])
+            paths = payload.get('paths', [])
+
+            # إضافة البيانات إلى قاعدة البيانات
+            for idx, (feat, path) in enumerate(zip(features, paths)):
+                collection.add(
+                    embeddings=[feat if isinstance(feat, list) else feat.tolist()],
+                    uris=[path],
+                    ids=[str(idx)]
+                )
+            st.success(f"Successfully loaded {len(paths)} items into database!")
+
     return collection
 
 
-collection = load_db()
-
-# محاولة تحميل ملف الميتا داتا إن وجد
-try:
-    with open('product_metadata_500.pkl', 'rb') as f:
-        metadata = pickle.load(f)
-except Exception:
-    metadata = None
+collection = init_db()
 
 
-# 4. دالة استخراج المتجه للصورة المرفوعة
+# دالة استخراج المتجه للصورة المرفوعة
 def get_embedding(img):
-    preprocess = transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
     tensor = preprocess(img).unsqueeze(0)
     with torch.no_grad():
         features = model(tensor)
@@ -58,7 +73,7 @@ def get_embedding(img):
     return embedding.tolist()
 
 
-# 5. واجهة رفع الصورة والبحث
+# 4. واجهة رفع الصورة والبحث
 uploaded_file = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
@@ -69,7 +84,7 @@ if uploaded_file is not None:
         with st.spinner("Searching..."):
             query_emb = get_embedding(image)
 
-            # جلب أكبر 5 نتائج فقط
+            # جلب أكبر 5 نتائج فقط بدقة
             results = collection.query(
                 query_embeddings=[query_emb],
                 n_results=5,
@@ -92,9 +107,8 @@ if uploaded_file is not None:
                         except Exception:
                             st.warning(f"Could not load image: {uri}")
 
-                        # حساب نسبة التشابه وعرضها تحت كل صورة
+                        # حساب نسبة التشابه وعرضها تحت الصورة
                         similarity = max(0, (1 - dist / 2) * 100)
                         st.caption(f"Similarity: {similarity:.1f}%")
             else:
-                st.warning(
-                    "No results found in ChromaDB. Please make sure your database path is correct and populated.")
+                st.warning("No results found in the database.")
