@@ -34,7 +34,7 @@ preprocess = transforms.Compose([
 ])
 
 
-# 3. إعداد قاعدة البيانات
+# 3. إعداد قاعدة البيانات وتصحيح المسارات
 @st.cache_resource
 def init_db():
     client = chromadb.PersistentClient(path="./data")
@@ -44,7 +44,7 @@ def init_db():
     pkl_path = os.path.join(base_dir, 'product_metadata_500.pkl')
 
     if collection.count() == 0 and os.path.exists(pkl_path):
-        with st.spinner("Loading data into ChromaDB... Please wait."):
+        with st.spinner("Building database with local paths..."):
             with open(pkl_path, 'rb') as f:
                 payload = pickle.load(f)
 
@@ -52,8 +52,8 @@ def init_db():
             paths = payload.get('paths', [])
 
             for idx, (feat, path) in enumerate(zip(features, paths)):
-                # توجيه المسار للمجلد المحلي الصحيح بناءً على اسم الملف
                 filename = os.path.basename(path)
+                # التأكد من اسم المجلد الصحيح (ring أو necklace)
                 folder = "ring" if "ring" in path.lower() or "ring" in filename.lower() else "necklace"
                 correct_path = os.path.join(base_dir, "Jewellery_Data", folder, filename)
 
@@ -68,7 +68,6 @@ def init_db():
 collection = init_db()
 
 
-# دالة استخراج المتجه للصورة المرفوعة
 def get_embedding(img):
     tensor = preprocess(img).unsqueeze(0)
     with torch.no_grad():
@@ -77,7 +76,7 @@ def get_embedding(img):
     return embedding.tolist()
 
 
-# 4. واجهة رفع الصورة والبحث
+# 4. واجهة البحث
 uploaded_file = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
@@ -88,7 +87,6 @@ if uploaded_file is not None:
         with st.spinner("Searching..."):
             query_emb = get_embedding(image)
 
-            # جلب أكبر 5 نتائج مع المسافات
             results = collection.query(
                 query_embeddings=[query_emb],
                 n_results=5,
@@ -100,25 +98,19 @@ if uploaded_file is not None:
                 match_distances = results['distances'][0]
 
                 st.success(f"Found top {len(match_uris)} similar items!")
-
                 st.subheader("Top 5 Similar Items:")
                 cols = st.columns(5)
 
                 for i, (uri, dist) in enumerate(zip(match_uris, match_distances)):
                     with cols[i]:
-                        # محاولة عرض الصورة الحقيقية
-                        try:
+                        # التحقق من وجود الصورة محلياً وعرضها
+                        if os.path.exists(uri):
                             st.image(uri, use_column_width=True)
-                        except Exception:
-                            st.warning("Image file missing locally")
+                        else:
+                            st.warning(f"Missing: {os.path.basename(uri)}")
 
-                        # تصحيح حساب نسبة التشابه لتظهر أرقام عشرية صحيحة (تحويل المسافة إلى نسبة مئوية)
-                        # كلما كانت المسافة أقل (Distance)، كلما زادت نسبة التشابه
-                        similarity = max(0.0, (1.0 - dist) * 100)
-                        if similarity == 0.0 and dist < 2.0:
-                            # معادلة بديلة في حال كانت المسافات تتراوح في نطاق مختلف
-                            similarity = max(0.0, 100 - (dist * 50))
-
+                        # حساب نسبة التشابه بشكل دقيق (Cosine distance تتراوح بين 0 و 2)
+                        similarity = max(0.0, (1.0 - (dist / 2.0)) * 100)
                         st.caption(f"Similarity: {similarity:.2f}%")
             else:
-                st.warning("No results found in the database.")
+                st.warning("No results found.")
