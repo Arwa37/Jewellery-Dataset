@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 from PIL import Image
 import chromadb
@@ -5,7 +6,6 @@ import torch
 import torchvision.models as models
 import torchvision.transforms as transforms
 import pickle
-import os
 
 # 1. إعداد الصفحة
 st.set_page_config(page_title="Jewelry Visual Search", layout="centered")
@@ -25,7 +25,6 @@ def load_model():
 
 model = load_model()
 
-# تحويلات الصور
 preprocess = transforms.Compose([
     transforms.Resize(256),
     transforms.CenterCrop(224),
@@ -34,23 +33,31 @@ preprocess = transforms.Compose([
 ])
 
 
-# 3. إعداد قاعدة البيانات وتعبئتها من ملف الـ pkl مباشرة إذا كانت فارغة
+# 3. إعداد قاعدة البيانات وتصحيح المسارات تلقائياً
 @st.cache_resource
 def init_db():
     client = chromadb.PersistentClient(path="./data")
     collection = client.get_or_create_collection(name="jewelry_collection")
 
-    # إذا كانت القاعدة فارغة، نقوم بقراءة ملف البيكل وتعبئة القاعدة
-    if collection.count() == 0 and os.path.exists('product_metadata_500.pkl'):
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    pkl_path = os.path.join(base_dir, 'product_metadata_500.pkl')
+
+    if collection.count() == 0 and os.path.exists(pkl_path):
         with st.spinner("Loading data into ChromaDB... Please wait."):
-            with open('product_metadata_500.pkl', 'rb') as f:
+            with open(pkl_path, 'rb') as f:
                 payload = pickle.load(f)
 
             features = payload.get('features', [])
             paths = payload.get('paths', [])
 
-            # إضافة البيانات إلى قاعدة البيانات
             for idx, (feat, path) in enumerate(zip(features, paths)):
+                # تصحيح المسار ليعمل على السحابة إذا كان يبدأ بمسارات كاجل القديمة
+                # سنعتمد على أخذ اسم المجلد الأخير والملف (مثل ring/ring_018.jpg) وربطه بمجلد المشروع المحلي
+                clean_path = path.replace("\\", "/")
+                if "Jewellery_Data" in clean_path:
+                    relative_part = clean_path.split("Jewellery_Data/")[-1]
+                    path = os.path.join(base_dir, "Jewellery_Data", relative_part)
+
                 collection.add(
                     embeddings=[feat if isinstance(feat, list) else feat.tolist()],
                     uris=[path],
@@ -64,7 +71,6 @@ def init_db():
 collection = init_db()
 
 
-# دالة استخراج المتجه للصورة المرفوعة
 def get_embedding(img):
     tensor = preprocess(img).unsqueeze(0)
     with torch.no_grad():
@@ -73,7 +79,7 @@ def get_embedding(img):
     return embedding.tolist()
 
 
-# 4. واجهة رفع الصورة والبحث
+# 4. واجهة البحث
 uploaded_file = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
@@ -84,7 +90,6 @@ if uploaded_file is not None:
         with st.spinner("Searching..."):
             query_emb = get_embedding(image)
 
-            # جلب أكبر 5 نتائج فقط بدقة
             results = collection.query(
                 query_embeddings=[query_emb],
                 n_results=5,
@@ -105,10 +110,10 @@ if uploaded_file is not None:
                         try:
                             st.image(uri, use_column_width=True)
                         except Exception:
-                            st.warning(f"Could not load image: {uri}")
+                            st.warning(f"Image not found at: {uri}")
 
-                        # حساب نسبة التشابه وعرضها تحت الصورة
-                        similarity = max(0, (1 - dist / 2) * 100)
+                        # حساب دقيق لنسبة التشابه بناءً على المسافة
+                        similarity = max(0, (1.0 - (dist / 4.0)) * 100)
                         st.caption(f"Similarity: {similarity:.1f}%")
             else:
-                st.warning("No results found in the database.")
+                st.warning("No results found.")
