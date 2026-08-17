@@ -7,13 +7,11 @@ import torchvision.models as models
 import torchvision.transforms as transforms
 import pickle
 
-# 1. إعداد الصفحة
 st.set_page_config(page_title="Jewelry Visual Search", layout="centered")
 st.title("💎 Jewelry Search Engine")
 st.write("Upload a jewelry photo to find the top 5 similar items.")
 
 
-# 2. تحميل النموذج
 @st.cache_resource
 def load_model():
     weights = models.MobileNet_V2_Weights.DEFAULT
@@ -25,7 +23,6 @@ def load_model():
 
 model = load_model()
 
-# تحويلات الصور
 preprocess = transforms.Compose([
     transforms.Resize(256),
     transforms.CenterCrop(224),
@@ -34,7 +31,6 @@ preprocess = transforms.Compose([
 ])
 
 
-# دالة بحث مرنة لإيجاد مكان الصورة بغض النظر عن المسار القديم
 def find_image_path(filename, base_dir):
     for root, dirs, files in os.walk(base_dir):
         if filename in files:
@@ -42,38 +38,31 @@ def find_image_path(filename, base_dir):
     return None
 
 
-# 3. إعداد قاعدة البيانات وتخزين الأسماء
 @st.cache_resource
 def init_db():
     client = chromadb.PersistentClient(path="./data")
-
     try:
         client.delete_collection(name="jewelry_collection")
     except Exception:
         pass
 
     collection = client.create_collection(name="jewelry_collection")
-
     base_dir = os.path.dirname(os.path.abspath(__file__))
     pkl_path = os.path.join(base_dir, 'product_metadata_500.pkl')
 
     if os.path.exists(pkl_path):
-        with st.spinner("Loading metadata... Please wait."):
-            with open(pkl_path, 'rb') as f:
-                payload = pickle.load(f)
+        with open(pkl_path, 'rb') as f:
+            payload = pickle.load(f)
+        features = payload.get('features', [])
+        paths = payload.get('paths', [])
 
-            features = payload.get('features', [])
-            paths = payload.get('paths', [])
-
-            for idx, (feat, path) in enumerate(zip(features, paths)):
-                filename = os.path.basename(path)
-                collection.add(
-                    embeddings=[feat if isinstance(feat, list) else feat.tolist()],
-                    uris=[filename],
-                    ids=[str(idx)]
-                )
-            st.success(f"Successfully loaded {len(paths)} items!")
-
+        for idx, (feat, path) in enumerate(zip(features, paths)):
+            filename = os.path.basename(path)
+            collection.add(
+                embeddings=[feat if isinstance(feat, list) else feat.tolist()],
+                uris=[filename],
+                ids=[str(idx)]
+            )
     return collection
 
 
@@ -88,7 +77,6 @@ def get_embedding(img):
     return embedding.tolist()
 
 
-# 4. واجهة البحث
 uploaded_file = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
@@ -98,13 +86,11 @@ if uploaded_file is not None:
     if st.button("Search"):
         with st.spinner("Searching..."):
             query_emb = get_embedding(image)
-
             results = collection.query(
                 query_embeddings=[query_emb],
                 n_results=5,
                 include=["uris", "distances"]
             )
-
             base_dir = os.path.dirname(os.path.abspath(__file__))
 
             if results and 'uris' in results and len(results['uris']) > 0 and len(results['uris'][0]) > 0:
@@ -118,13 +104,11 @@ if uploaded_file is not None:
                 for i, (filename, dist) in enumerate(zip(match_filenames, match_distances)):
                     with cols[i]:
                         real_path = find_image_path(filename, base_dir)
-
                         if real_path and os.path.exists(real_path):
                             st.image(real_path, use_column_width=True)
                         else:
-                            st.warning(f"Missing: {filename}")
+                            st.info(f"Item: {filename}")
 
-                        # حساب نسبة التشابه الدقيقة
                         similarity = max(0.0, (1.0 - (dist / 2.0)) * 100)
                         st.caption(f"Similarity: {similarity:.2f}%")
             else:
