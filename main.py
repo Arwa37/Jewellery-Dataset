@@ -115,10 +115,10 @@ if uploaded_file is not None:
                         else:
                             st.info(f"Item: {filename}")
 
-                        # معادلة النسبة المئوية (تم زيادة القاسم إلى 10 لضمان ظهور أرقام)
-                        # جربي تغيير الرقم 10.0 إلى رقم أكبر إذا استمرت النسبة 0
-                        similarity = max(0.0, (1.0 - (dist / 10.0)) * 100)
+                        # معادلة عكسية آمنة تضمن عدم وصول النسبة لصفر وإعطاء نسب مئوية دقيقة
+                        similarity = 100.0 / (1.0 + dist)
 
+                        st.caption(f"Dist: {dist:.2f}")
                         st.caption(f"Similarity: {similarity:.2f}%")
             else:
                 st.warning("No results found.")
