@@ -1,0 +1,6 @@
+torch
+torchvision
+chromadb
+streamlit
+numpy
+pillow
