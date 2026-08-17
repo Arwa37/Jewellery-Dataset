@@ -4,11 +4,11 @@ import chromadb
 import torch
 import torchvision.models as models
 import torchvision.transforms as transforms
-import pickle  # استيراد مكتبة البيكل
 
 # 1. إعداد الصفحة
 st.set_page_config(page_title="Jewelry Visual Search", layout="centered")
 st.title("💎 Jewelry Search Engine")
+st.write("Upload a jewelry photo to find the top 5 similar items.")
 
 
 # 2. تحميل النموذج
@@ -24,22 +24,17 @@ def load_model():
 model = load_model()
 
 
-# 3. تحميل قاعدة البيانات وملف الميتا داتا
+# 3. اتصال بقاعدة البيانات
 @st.cache_resource
-def load_data():
+def load_db():
     client = chromadb.PersistentClient(path="./data")
-    collection = client.get_or_create_collection(name="jewelry_collection")
-
-    # تحميل ملف البيكل
-    with open('product_metadata_500.pkl', 'rb') as f:
-        metadata = pickle.load(f)
-    return collection, metadata
+    return client.get_or_create_collection(name="jewelry_collection")
 
 
-collection, metadata = load_data()
+collection = load_db()
 
 
-# 4. دالة استخراج المتجه
+# 4. دالة استخراج المتجه للصورة
 def get_embedding(img):
     preprocess = transforms.Compose([
         transforms.Resize(256),
@@ -54,7 +49,7 @@ def get_embedding(img):
     return embedding.tolist()
 
 
-# 5. واجهة البحث
+# 5. واجهة رفع الصورة والبحث
 uploaded_file = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
@@ -64,28 +59,30 @@ if uploaded_file is not None:
     if st.button("Search"):
         with st.spinner("Searching..."):
             query_emb = get_embedding(image)
+
+            # تحديد عدد النتائج بـ 5 فقط للحصول على أكبر 5 صور مشابهة
             results = collection.query(
                 query_embeddings=[query_emb],
-                n_results=25,
+                n_results=5,
                 include=["uris", "distances"]
             )
 
-            match_uris = results['uris'][0]
-            match_distances = results['distances'][0]
+            # التحقق من أن القاعدة تحتوي على صور وليست فارغة
+            if results and 'uris' in results and len(results['uris']) > 0 and len(results['uris'][0]) > 0:
+                match_uris = results['uris'][0]
+                match_distances = results['distances'][0]
 
-            st.success(f"Found {len(match_uris)} similar items!")
+                st.success(f"Found top {len(match_uris)} similar items!")
 
-            st.subheader("Similar Items:")
-            cols = st.columns(5)
+                st.subheader("Top 5 Similar Items:")
+                cols = st.columns(5)
 
-            for i, (uri, dist) in enumerate(zip(match_uris, match_distances)):
-                with cols[i % 5]:
-                    st.image(uri, use_column_width=True)
-
-                    # ربط النتيجة بملف الميتا داتا (نفترض أن الميتا داتا مفهرسة بمسار الصورة)
-                    # يمكنك تغيير 'product_name' إلى المفتاح الموجود فعلياً في ملف البيكل الخاص بك
-                    product_info = metadata.get(uri, "Unknown Product")
-
-                    similarity = max(0, (1 - dist / 2) * 100)
-                    st.caption(f"**{product_info}**")  # عرض اسم المنتج
-                    st.caption(f"Similarity: {similarity:.1f}%")
+                for i, (uri, dist) in enumerate(zip(match_uris, match_distances)):
+                    with cols[i]:
+                        st.image(uri, use_column_width=True)
+                        # حساب نسبة التشابه وعرضها تحت كل صورة
+                        similarity = max(0, (1 - dist / 2) * 100)
+                        st.caption(f"Similarity: {similarity:.1f}%")
+            else:
+                st.error(
+                    "The database is empty! Please run your `prepare_data.py` script first to populate ChromaDB with embeddings.")
